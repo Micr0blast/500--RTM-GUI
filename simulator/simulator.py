@@ -1,6 +1,7 @@
 import sys
 from PySide2 import QtWidgets as qtw
 from PySide2 import QtCore as qtc
+import csv
 
 from simulator.view.simulatorView import SimulatorView
 from simulator.model.simulatorModel import LOWER_CURRENT_BOUND, PATH_TO_IMAGES, SimulatorModel, UPPER_CURRENT_BOUND
@@ -182,8 +183,12 @@ class SimulatorWindow(qtw.QMainWindow):
             self.endScan()
             return
         
+        scanImage = self.model.getScanImage(startX, startY, lengthX, self.currentLineIdx, direction, lengthY, breadth)
         
-        self.transmitScanImg.emit(self.model.getScanImage(startX, startY, lengthX, self.currentLineIdx, direction, lengthY, breadth))
+        with open("scan.csv", "w") as scanFile:
+            writer = csv.writer(scanFile, delimiter=',')
+            writer.writerows(scanImage)
+        self.transmitScanImg.emit(scanImage)
         
 
 

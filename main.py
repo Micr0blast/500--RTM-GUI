@@ -3,9 +3,11 @@ import sys
 from PySide2 import QtWidgets as qtw
 from PySide2 import QtGui as qtg
 from PySide2 import QtCore as qtc
+import numpy as np
 import tifffile
 
 from widgets.resources import *
+from csvWatcher import CSVModifiedHandler as CSVWatcher
 
 from widgets.scanTabWidget import ScanTabWidget
 from widgets.fileTreeWidget import FileTreeWidget
@@ -31,6 +33,8 @@ SETPOINT_VALUES = ("Zielstrom:", 20, "nA", True, 10, 100)
 X_START_VALUES = ("Startkoordinate X:", 250, "", False, 0, 4000)
 Y_START_VALUES = ("Startkoordinate Y:", 250, "", False, 0, 4000)
 RESOLUTION_VALUES = ("Auflösung:", 250, "pixel x pixel", False, "", "")
+
+
 
 
 class ValueRadioButton(qtw.QRadioButton):
@@ -83,6 +87,11 @@ class MainWindow(qtw.QMainWindow):
 
         # Parameters dock
         self.setupParametersDock()
+
+        self.watcher = CSVWatcher("scan.csv", ".")
+        self.watcher.start()
+        
+        
 
         # enable beta splash screen
         if ENABLE_SPLASH_SCREEN:
@@ -312,7 +321,7 @@ class MainWindow(qtw.QMainWindow):
                 f"RTM auswählen um {PID_PARAMETER_LABEL} zu aktualisieren.")
 
     def setupLogDock(self):
-        """ This function sets up the Log Dock and its styleing
+        """ This function sets up the Log Dock and its styling
         """
         self.spiDock = qtw.QDockWidget("Log")
 
@@ -455,6 +464,13 @@ class MainWindow(qtw.QMainWindow):
         else:
             # TODO Add connection to hardware prototype code here
             # init rtm connection
+            # check for connection 
+            # // define correct output
+            # // start PID
+            # // hand over parameters for scanning
+            # // start csvWatcher
+            # // on stop or pause stop csvWatcher
+            
             pass
 
 
@@ -472,6 +488,11 @@ class MainWindow(qtw.QMainWindow):
         else:
             self.microscope.show()
 
+    def updateScanCanvasFromFile(self):
+        imgData = np.genfromtxt("scan.csv", delimiter=",")
+        self.updateScanCanvas(imgData)
+
+
     def startHandler(self):
         """This function handles stop and resume button functionality
         """
@@ -485,7 +506,8 @@ class MainWindow(qtw.QMainWindow):
         elif self.isMidScan:
 
             self.statusBar.showMessage("Scan fortgesetzt", 10)
-            self.microscope.transmitScanImg.connect(self.updateScanCanvas)
+            # self.microscope.transmitScanImg.connect(self.updateScanCanvas)
+            self.watcher.signalFileChanged.connect(self.updateScanCanvasFromFile)
             self.startBtn.setEnabled(False)
             self.stopBtn.setEnabled(True)
             self.microscope.resumeScan()
@@ -493,7 +515,8 @@ class MainWindow(qtw.QMainWindow):
             self.updateLog(f"Scan wird fortgesetzt.")
         else:
             self.statusBar.showMessage("Scan gestarted", 10)
-            self.microscope.transmitScanImg.connect(self.updateScanCanvas)
+            # self.microscope.transmitScanImg.connect(self.updateScanCanvas)
+            self.watcher.signalFileChanged.connect(self.updateScanCanvasFromFile)
 
             self.startBtn.setEnabled(False)
             self.stopBtn.setEnabled(True)
@@ -512,7 +535,8 @@ class MainWindow(qtw.QMainWindow):
         self.microscope.pauseScan()
         self.startBtn.setEnabled(True)
         self.pauseBtn.setEnabled(False)
-        self.microscope.transmitScanImg.disconnect(self.updateScanCanvas)
+        # self.microscope.transmitScanImg.disconnect(self.updateScanCanvas)
+        self.watcher.signalFileChanged.disconnect()
         self.stopBtn.setEnabled(True)
 
     def stopHandler(self):
@@ -523,7 +547,8 @@ class MainWindow(qtw.QMainWindow):
         self.pauseBtn.setEnabled(False)
         self.stopBtn.setEnabled(False)
         self.microscope.stopScan()
-        self.microscope.transmitScanImg.disconnect(self.updateScanCanvas)
+        # self.microscope.transmitScanImg.disconnect(self.updateScanCanvas)
+        self.watcher.signalFileChanged.disconnect()
 
 ###  functions below are used in current iteration
 
