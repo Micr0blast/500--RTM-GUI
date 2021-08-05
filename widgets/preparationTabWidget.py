@@ -69,6 +69,7 @@ class PreparationTabWidget(qtw.QWidget):
         self.rtmComboBox.addItem("Auswählen...")
         self.rtmComboBox.model().item(0).setEnabled(False)
         self.rtmComboBox.addItem("Simulator")
+        self.rtmComboBox.addItem("COM_dummy")
 
         self.rtmSelectRow.addWidget(self.prepDescrLbl)
         self.rtmSelectRow.addWidget(self.rtmComboBox)
