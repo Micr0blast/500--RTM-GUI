@@ -185,9 +185,18 @@ class SimulatorWindow(qtw.QMainWindow):
         
         scanImage = self.model.getScanImage(startX, startY, lengthX, self.currentLineIdx, direction, lengthY, breadth)
         
-        with open("scan.csv", "w") as scanFile:
-            writer = csv.writer(scanFile, delimiter=',')
-            writer.writerows(scanImage)
+        with open("scan.csv", "w", encoding="utf-8", newline="") as scanFile:
+            header = ["X", "Y", "Z"]
+            writer = csv.writer(scanFile, delimiter=';')
+            writer.writerow(header)
+            for i in range(lengthX):
+                for j in range(lengthY):
+                    writer.writerow([i, j, scanImage[i][j]])
+            
+        # with open("scan_np.csv", "w", encoding="utf-8", newline="") as scanFile:
+        #     writer = csv.writer(scanFile)
+        #     writer.writerows(scanImage)
+
         self.transmitScanImg.emit(scanImage)
         
 

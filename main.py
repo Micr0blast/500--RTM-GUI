@@ -3,8 +3,12 @@ import sys
 from PySide2 import QtWidgets as qtw
 from PySide2 import QtGui as qtg
 from PySide2 import QtCore as qtc
+
 import numpy as np
+import pandas as pd
 import tifffile
+
+import subprocess
 
 from widgets.resources import *
 from csvWatcher import CSVModifiedHandler as CSVWatcher
@@ -13,6 +17,8 @@ from widgets.scanTabWidget import ScanTabWidget
 from widgets.fileTreeWidget import FileTreeWidget
 from widgets.preparationTabWidget import PreparationTabWidget
 from simulator.simulator import SimulatorWindow
+
+PATH_TO_SCRIPT = "rtm-pi"
 
 ENABLE_FILE_TREE = False
 ENABLE_SPLASH_SCREEN = False
@@ -30,10 +36,12 @@ BIAS_VOLTAGE_VALUES = ("Bias-Spannung", 0.1, "V", True, 0.1, 1.0)
 PK_VALUES = ("kP:", 2, "", True, 0, 10000)
 IK_VALUES = ("kI:", 0.5, "", True, 0, 10000)
 SETPOINT_VALUES = ("Zielstrom:", 20, "nA", True, 10, 100)
+REMAINING_TC_DIFF_VALUES = ("Erlaubter Zielstrom Abstand", 0.01, "nA", True, 0.001, 10)
+
 X_START_VALUES = ("Startkoordinate X:", 250, "", False, 0, 4000)
 Y_START_VALUES = ("Startkoordinate Y:", 250, "", False, 0, 4000)
-RESOLUTION_VALUES = ("Auflösung:", 250, "pixel x pixel", False, "", "")
-
+RESOLUTION_VALUES = ("Auflösung:", 250, "Breite x Höhe", False, "", "")
+DAC_VALUES = ("DAC", 10, "", False, 1, 1000)
 
 
 
@@ -53,6 +61,8 @@ class MainWindow(qtw.QMainWindow):
 
     microscope = None
     imgData = []
+    lengthX = 0
+    lengthY = 0
 
     isMidScan = False
 
@@ -206,6 +216,10 @@ class MainWindow(qtw.QMainWindow):
             IK_VALUES[0], f"{IK_VALUES[1]}", f"{IK_VALUES[4]} - {IK_VALUES[5]} {IK_VALUES[2]}", double=IK_VALUES[3], top=IK_VALUES[4], bottom=IK_VALUES[5])
         self.zHeightRow = self.createParameterRow(
             SETPOINT_VALUES[0], f"{SETPOINT_VALUES[1]}", f"{SETPOINT_VALUES[4]} - {SETPOINT_VALUES[5]} {SETPOINT_VALUES[2]}", double=SETPOINT_VALUES[3], top=SETPOINT_VALUES[4], bottom=SETPOINT_VALUES[5])
+        
+        self.tcDiffRow = self.createParameterRow(
+            REMAINING_TC_DIFF_VALUES[0], f"{REMAINING_TC_DIFF_VALUES[1]}", f"{REMAINING_TC_DIFF_VALUES[4]} - {REMAINING_TC_DIFF_VALUES[5]} {REMAINING_TC_DIFF_VALUES[2]}", double=REMAINING_TC_DIFF_VALUES[3], top=REMAINING_TC_DIFF_VALUES[4], bottom=REMAINING_TC_DIFF_VALUES[5])
+
         self.updateControlParametersBtn = qtw.QPushButton(
             f"{PID_PARAMETER_LABEL} aktualisieren", clicked=self.updateParametersHandler)
 
@@ -213,6 +227,7 @@ class MainWindow(qtw.QMainWindow):
         self.piGroupBox.layout().addWidget(self.pGainRow)
         self.piGroupBox.layout().addWidget(self.iGainRow)
         self.piGroupBox.layout().addWidget(self.zHeightRow)
+        self.piGroupBox.layout().addWidget(self.tcDiffRow)
 
         self.piGroupBox.layout().addWidget(self.updateControlParametersBtn)
 
@@ -254,15 +269,14 @@ class MainWindow(qtw.QMainWindow):
 
         self.scanGroupBox.layout().addWidget(self.directionRow)
 
-        # TODO: add later
-        # self.multiplierRow = self.createParameterRow(
-        #     "DAC-Multiplikator", "1", "1 - 100")
-        # self.scanGroupBox.layout().addWidget(self.multiplierRow)
+        self.multiplierRow = self.createParameterRow(
+            DAC_VALUES[0], f"{DAC_VALUES[1]}", f"{DAC_VALUES[4]} - {DAC_VALUES[5]} {DAC_VALUES[2]}", double=DAC_VALUES[3], top=DAC_VALUES[4], bottom=DAC_VALUES[5])
+        self.scanGroupBox.layout().addWidget(self.multiplierRow)
 
-        self.scanVelocityRow = self.createParameterRow(
-            "Scan-Breite", "0.2", "0.1 - 20.0 mV/px", True, 0.1, 20
-        )
-        self.scanGroupBox.layout().addWidget(self.scanVelocityRow)
+        # self.scanVelocityRow = self.createParameterRow(
+        #     "Scan-Breite", "0.2", "0.1 - 20.0 mV/px", True, 0.1, 20
+        # )
+        # self.scanGroupBox.layout().addWidget(self.scanVelocityRow)
 
         self.controlGroupBox = qtw.QGroupBox("Scan-Controls", self)
         self.controlGroupBox.setStyleSheet("QGroupBox {font-weight: bold;}")
@@ -282,7 +296,7 @@ class MainWindow(qtw.QMainWindow):
         self.expDockWidgetContainer.layout().addWidget(self.controlGroupBox)
         self.expDockWidgetContainer.layout().addStretch()
 
-    def getExperimentParameters(self):
+    def getExperimentParameters(self, forSubprocess=False):
         """Extracts all scan related parameters and returns them as a tuple
 
         Returns:
@@ -296,14 +310,20 @@ class MainWindow(qtw.QMainWindow):
         xEnd = int(self.xEndRow.children()[2].text())
         biasV = float(self.biasVoltageRow.children()[2].text())
         # yEnd = int(self.yEndRow.children()[2].text())
+        remainingDiff = float(self.tcDiffRow.children()[2].text())
         yEnd = xEnd
 
+        # set values for data reshaping
+        self.lengthX = xEnd
+        self.lengthY = yEnd
+
         direction = 0 if self.directionRow.children()[2].isChecked() else 1
-        # multiplier = int(self.multiplierRow.children()[2].text())
-        velocity = float(self.scanVelocityRow.children()[2].text())
-
-        return (pGain, iGain, zHeight, xStart, yStart, xEnd, yEnd, direction, velocity, biasV)
-
+        multiplier = int(self.multiplierRow.children()[2].text())
+        # velocity = float(self.scanVelocityRow.children()[2].text())
+        if forSubprocess:
+            return (iGain, pGain, zHeight, remainingDiff, xStart, yStart, direction, xEnd, yEnd, multiplier)
+        return (pGain, iGain, zHeight, xStart, yStart, xEnd, yEnd, direction, multiplier, biasV)
+    
     def updateParametersHandler(self):
         """This function handles the PID-parameter update functionality
         """
@@ -461,6 +481,10 @@ class MainWindow(qtw.QMainWindow):
         if selected == 1: # if simulator is chosen
             self.updateLog("Verbindung wird aufgebaut...")
             qtc.QTimer.singleShot(2000, lambda: self.showSimulator())
+        elif selected == 2:
+            self.updateLog("Com dummy chosen. Parameters will be sent via the RTM script.")
+            self.prepTabWidget.updateLED(True)
+            self.microscope = 1
         else:
             # TODO Add connection to hardware prototype code here
             # init rtm connection
@@ -477,7 +501,7 @@ class MainWindow(qtw.QMainWindow):
     def showSimulator(self):
         """This function handles showing the simulator and connecting related signals
         """
-        if self.microscope is None:
+        if self.microscope is None or self.microscope == 1:
             self.microscope = SimulatorWindow()
             self.microscope.transmitTunnelCurrent.connect(self.prepTabWidget.updatePlot)
             self.microscope.logMessage.connect(self.updateLog)
@@ -489,22 +513,45 @@ class MainWindow(qtw.QMainWindow):
             self.microscope.show()
 
     def updateScanCanvasFromFile(self):
-        imgData = np.genfromtxt("scan.csv", delimiter=",")
-        self.updateScanCanvas(imgData)
+        imgData = self.read_data("scan.csv")
+        # imgData = np.genfromtxt("scan.csv", delimiter=";")
+        reshaped_data = self.reshape_data(imgData, self.lengthX, self.lengthY)
+        df = pd.DataFrame(reshaped_data)
+        df.to_csv("csv_file.csv",sep=";", header=False, index=False)
+        self.updateScanCanvas(np.array(reshaped_data))
+
+
+    def read_data(self, path):
+        data = pd.read_csv(path, sep=";", header=0, encoding="utf8")
+        return data
+
+
+    def reshape_data(self, data, lengthX, lengthY):
+        reshaped = []
+        for i in range(lengthX):
+            row=[]
+            for j in range(lengthY):
+                
+                row.append(data["Z"][i*lengthX+j])
+            reshaped.append(row)
+            
+        return reshaped
 
 
     def startHandler(self):
         """This function handles stop and resume button functionality
         """
 
-        params = self.getExperimentParameters()
-
         if self.microscope is None:
             qtw.QMessageBox.warning(self,
                                     "Mikroskop Verbinden!",
                                     "Es muss eine Verbindung zu einem Rastertunnelmikroskop bestehen um einen Scan zu starten!")
+        elif self.microscope == 1:
+            params = list(self.getExperimentParameters(forSubprocess=True))
+            params.insert(0, PATH_TO_SCRIPT)
+            subprocess.call(params)
         elif self.isMidScan:
-
+            params = self.getExperimentParameters()
             self.statusBar.showMessage("Scan fortgesetzt", 10)
             # self.microscope.transmitScanImg.connect(self.updateScanCanvas)
             self.watcher.signalFileChanged.connect(self.updateScanCanvasFromFile)
@@ -514,6 +561,7 @@ class MainWindow(qtw.QMainWindow):
 
             self.updateLog(f"Scan wird fortgesetzt.")
         else:
+            params = self.getExperimentParameters()
             self.statusBar.showMessage("Scan gestarted", 10)
             # self.microscope.transmitScanImg.connect(self.updateScanCanvas)
             self.watcher.signalFileChanged.connect(self.updateScanCanvasFromFile)
