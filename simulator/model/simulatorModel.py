@@ -132,6 +132,12 @@ class SimulatorModel(qtc.QObject):
     # def emitCurrentLine(self, line):
     #     self.lineFinished.emit(line)
 
+    def mapIMGtoIntegerSpace(self, data): # converts data from 0 - 255 to 0 -65536
+        unsignedIntegerRange = [0, 65536]
+        data = (data / (255)*unsignedIntegerRange[1]-1) 
+
+        return data.astype(int) 
+
     def getScanImage(self, startX: int, startY: int, lengthX: int, lengthY: int, direction: int, maxY: int, breadth: int):
         img = np.zeros(shape=(lengthX, maxY))
 
@@ -144,8 +150,8 @@ class SimulatorModel(qtc.QObject):
                 startX, startY+i, lengthX, direction, breadth)
 
             img[i] = line
+        img = self.mapIMGtoIntegerSpace(img)
         return img
-
 
 
     
